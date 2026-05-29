@@ -1,17 +1,12 @@
-MODEL:=resnet20
-
 .PHONY: run
 run:
-	python -u trainer.py --arch=$(MODEL) --save-dir=save_$(MODEL) | tee -a log_$(MODEL)
+	python main.py
 
 .PHONY: fmt
 fmt:
 	isort .
-	black .
+	black --skip-string-normalization .
 
 .PHONY: clean
 clean:
-	rm -rf data
-	rm -rf log_resnet20
-	rm -rf save_resnet20
-	rm -rf __pycache__
+	find __pycache__ | xargs rm -rf
