@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.optim
 import torch.utils.data
 import torchvision.datasets as datasets
-import torchvision.transforms as transforms
+import torchvision.transforms as T
 from timm.utils.metrics import AverageMeter, accuracy
 from torch.utils.data import DataLoader
 
@@ -96,6 +96,7 @@ if __name__ == '__main__':
     parser.add_argument('--momentum', type=float, default=0.9)
     parser.add_argument('--weight-decay', type=float, default=1e-4)
     parser.add_argument('--exp-dir', type=str, default='exps')
+    parser.add_argument('--dataset-dir', type=str, default='./data')
     args = parser.parse_args()
 
     cudnn.benchmark = True
@@ -118,35 +119,36 @@ if __name__ == '__main__':
     model = model.to(device)
     model = torch.compile(model)
 
-    train_transforms = transforms.Compose(
+    train_transforms = T.Compose(
         [
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(32, 4),
-            transforms.ToTensor(),
-            transforms.Normalize(
+            T.RandomHorizontalFlip(),
+            T.RandomCrop(32, 4),
+            T.ToTensor(),
+            T.Normalize(
                 mean=[0.485, 0.456, 0.406],
                 std=[0.229, 0.224, 0.225],
             ),
         ]
     )
-    val_transforms = transforms.Compose(
+    val_transforms = T.Compose(
         [
-            transforms.ToTensor(),
-            transforms.Normalize(
+            T.ToTensor(),
+            T.Normalize(
                 mean=[0.485, 0.456, 0.406],
                 std=[0.229, 0.224, 0.225],
             ),
         ]
     )
 
+    dataset_dir = os.path.expanduser(args.dataset_dir)
     train_dataset = datasets.CIFAR10(
-        root='./data',
+        root=dataset_dir,
         train=True,
         transform=train_transforms,
         download=True,
     )
     val_dataset = datasets.CIFAR10(
-        root='./data', train=False, transform=val_transforms, download=True
+        root=dataset_dir, train=False, transform=val_transforms, download=True
     )
 
     train_loader = torch.utils.data.DataLoader(
