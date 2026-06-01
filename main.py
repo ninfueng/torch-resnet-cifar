@@ -100,6 +100,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     cudnn.benchmark = True
+    torch.set_float32_matmul_precision('high')
 
     datetime_ = str(datetime.now()).replace(' ', '-')
     exp_dir = os.path.join(args.exp_dir, datetime_)
@@ -178,12 +179,7 @@ if __name__ == '__main__':
         milestones=[100, 150],
     )
 
-    best_prec1 = 0
-
-    if args.arch in ['resnet1202', 'resnet110']:
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = args.lr * 0.1
-
+    best_prec1 = best_epoch = 0
     for epoch in range(1, args.epochs + 1):
         train(model, train_loader, criterion, optimizer, epoch, device)
         prec1 = test(model, val_loader, criterion, epoch, device)
@@ -191,12 +187,14 @@ if __name__ == '__main__':
 
         is_best = prec1 > best_prec1
         best_prec1 = max(prec1, best_prec1)
+        best_epoch = epoch + 1
         if is_best:
             torch.save(
                 {
-                    'epoch': epoch + 1,
+                    'epoch': best_epoch,
                     'state_dict': model.state_dict(),
                     'best_prec1': best_prec1,
                 },
                 os.path.join(exp_dir, f'{args.arch}.pt'),
             )
+    logging.info(f'Best E:{best_epoch}, A: {best_prec1:.2f}')
