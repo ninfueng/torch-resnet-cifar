@@ -97,6 +97,7 @@ if __name__ == '__main__':
     parser.add_argument('--weight-decay', type=float, default=1e-4)
     parser.add_argument('--exp-dir', type=str, default='exps')
     parser.add_argument('--dataset-dir', type=str, default='./data')
+    parser.add_argument('--compile', action='store_true')
     args = parser.parse_args()
 
     cudnn.benchmark = True
@@ -118,7 +119,8 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = resnet.__dict__[args.arch]()
     model = model.to(device)
-    model = torch.compile(model)
+    if args.compile:
+        model = torch.compile(model)
 
     train_transforms = T.Compose(
         [
