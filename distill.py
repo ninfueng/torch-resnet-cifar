@@ -11,8 +11,8 @@ import torchvision.transforms as T
 import torch.backends.cudnn as cudnn
 from timm.utils.metrics import AverageMeter, accuracy
 from torch import Tensor, nn
-from torch.optim import AdamW, SGD
-from torch.optim.lr_scheduler import CosineAnnealingLR, MultiStepLR
+from torch.optim import SGD
+from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10
 
@@ -268,12 +268,6 @@ if __name__ == '__main__':
         optimizer,
         milestones=[100, 150],
     )
-    # optimizer = AdamW(
-    #     student_model.parameters(),
-    #     args.lr,
-    #     weight_decay=args.weight_decay,
-    # )
-    # lr_scheduler = CosineAnnealingLR(optimizer, args.epochs)
 
     forward_manager = set_forward_manager(
         teacher_model,
@@ -306,11 +300,11 @@ if __name__ == '__main__':
 
         is_best = student_prec1 > best_student_prec1
         best_student_prec1 = max(student_prec1, best_student_prec1)
-        best_epoch = epoch + 1
+        best_student_epoch = epoch + 1
         if is_best:
             torch.save(
                 {
-                    'epoch': best_epoch,
+                    'epoch': best_student_epoch,
                     'state_dict': student_model.state_dict(),
                     'best_student_prec1': best_student_prec1,
                 },
