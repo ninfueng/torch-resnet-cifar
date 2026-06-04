@@ -6,13 +6,14 @@ from datetime import datetime
 import torch
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
-from torch.optim import SGD
-from torchvision.datasets import CIFAR10
-from torch.utils.data import DataLoader
 import torchvision.transforms as T
+from torch.optim import SGD
+from torch.utils.data import DataLoader
+from torchvision.datasets import CIFAR10
+from torch.optim.lr_scheduler import MultiStepLR
 
 import resnet
-from train_utils import train, test
+from train_utils import test, train
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -78,7 +79,7 @@ if __name__ == '__main__':
         transform=train_transforms,
         download=True,
     )
-    val_dataset = CIFAR10(
+    test_dataset = CIFAR10(
         root=dataset_dir, train=False, transform=val_transforms, download=True
     )
 
@@ -89,8 +90,8 @@ if __name__ == '__main__':
         num_workers=args.workers,
         pin_memory=True,
     )
-    val_loader = DataLoader(
-        val_dataset,
+    test_loader = DataLoader(
+        test_dataset,
         batch_size=round(args.batch_size * 1.5),
         shuffle=False,
         num_workers=args.workers,
@@ -104,7 +105,7 @@ if __name__ == '__main__':
         momentum=args.momentum,
         weight_decay=args.weight_decay,
     )
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+    lr_scheduler = MultiStepLR(
         optimizer,
         milestones=[100, 150],
     )
@@ -112,7 +113,7 @@ if __name__ == '__main__':
     best_prec1 = best_epoch = 0
     for epoch in range(1, args.epochs + 1):
         train(model, train_loader, criterion, optimizer, epoch, device)
-        prec1 = test(model, val_loader, criterion, epoch, device)
+        prec1 = test(model, test_loader, criterion, epoch, device)
         lr_scheduler.step()
 
         is_best = prec1 > best_prec1

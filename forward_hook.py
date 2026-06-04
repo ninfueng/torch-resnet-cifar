@@ -27,9 +27,9 @@ import logging
 from collections import abc
 
 import torch
-from torch.nn.parallel.scatter_gather import gather
-from torch.nn import DataParallel, Sequential, ModuleList
+from torch.nn import DataParallel, ModuleList, Sequential
 from torch.nn.parallel import DistributedDataParallel
+from torch.nn.parallel.scatter_gather import gather
 
 logger = logging.getLogger(__name__)
 
