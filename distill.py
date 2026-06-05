@@ -176,17 +176,15 @@ def logit_distillation(
     student_logits: Tensor,
     T: float,
 ) -> Tensor:
-
     soft_teacher_logits = F.softmax(teacher_logits / T, dim=-1)
     soft_student_logits = F.log_softmax(student_logits / T, dim=-1)
 
-    # NOTE: cross entropy between teacher to teacher - student
-    distill_loss = (
-        (T**2.0)
-        * soft_teacher_logits
-        * (soft_teacher_logits.log() - soft_student_logits)
+    distill_loss = (T ** 2.0) * F.kl_div(
+        soft_student_logits,
+        soft_teacher_logits,
+        reduction='batchmean'
+
     )
-    distill_loss = distill_loss.mean()
     return distill_loss
 
 
@@ -219,22 +217,22 @@ if __name__ == '__main__':
     parser.add_argument('--compile', action='store_true')
     args = parser.parse_args()
 
-    # NOTE: teacher_layer: [student_layer, feature_extractor, loss, loss_weight]
+    # NOTE: teacher_layer: [student_layer, feature_extractor, loss, weight_loss]
     TEACHER_STUDENT_LAYER_MAP = {
-        # cross entropy loss
+        # cross-entropy loss
         'base': [
             None,
             None,
             None,
-            3 / 4,
+            2 / 4,
         ],
-        # # feature-based
-        # 'layer3.17': [
-        #     'layer3.0',
-        #     nn.Identity(),
-        #     nn.MSELoss(reduction='mean'),
-        #     1 / 8,
-        # ],
+        # feature-based
+        'layer3.17': [
+            'layer3.0',
+            nn.Identity(),
+            nn.MSELoss(reduction='mean'),
+            1 / 4,
+        ],
         # logit-based
         'linear': [
             'linear',
@@ -268,13 +266,15 @@ if __name__ == '__main__':
     if os.path.isfile(teacher_dir):
         teacher_state_dict = torch.load(teacher_dir, weights_only=False)['state_dict']
     else:
-        raise NotImplementedError('')
+        raise NotImplementedError(
+            f'Requires `teacher_dir`. Your: `{teacher_dir}`.'
+        )
 
     student_state_dict = None
     if os.path.isfile(student_dir):
         student_state_dict = torch.load(student_dir, weights_only=False)['state_dict']
     else:
-        logging.warning(f'student_dir is not found. Your: {student_dir}')
+        logging.warning(f'`student_dir` is not found. Your: `{student_dir}`.')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     teacher_model = resnet.__dict__[args.teacher_arch]()
