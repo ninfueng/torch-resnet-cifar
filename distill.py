@@ -27,30 +27,40 @@ def set_forward_manager(
     student_model: nn.Module,
     teacher_student_layer_map: dict[str, list[str | nn.Module | None]],
     device,
-) -> ForwardHookManager:
+) -> dict[str, ForwardHookManager]:
 
-    forward_manager = ForwardHookManager(device)
+    teacher_forward_manager = ForwardHookManager(device)
+    student_forward_manager = ForwardHookManager(device)
+
     for teacher_layer in teacher_student_layer_map.keys():
         if teacher_layer == 'base':
             continue
 
         student_layer, _, _, _ = teacher_student_layer_map[teacher_layer]
-        forward_manager.add_hook(
+        teacher_forward_manager.add_hook(
             teacher_model, teacher_layer, requires_input=False, requires_output=True
         )
-        forward_manager.add_hook(
+        student_forward_manager.add_hook(
             student_model, student_layer, requires_input=False, requires_output=True
         )
-    return forward_manager
+
+    return {
+        'teacher_forward_manager': teacher_forward_manager,
+        'student_forward_manager': student_forward_manager,
+    }
 
 
 def get_distill_losses(
-    forward_manager: ForwardHookManager,
+    teacher_forward_manager: ForwardHookManager,
+    student_forward_manager: ForwardHookManager,
     teacher_student_layer_map: dict[str, list[str | nn.Module]],
 ) -> list[Tensor]:
-    io_dict = forward_manager.pop_io_dict()
+
+    teacher_io_dict = teacher_forward_manager.pop_io_dict()
+    student_io_dict = student_forward_manager.pop_io_dict()
 
     distill_losses = []
+
     for teacher_layer in teacher_student_layer_map.keys():
         if teacher_layer == 'base':
             continue
@@ -59,12 +69,13 @@ def get_distill_losses(
             teacher_layer
         ]
 
-        teacher_out = io_dict[teacher_layer]['output']
-        student_out = io_dict[student_layer]['output']
+        teacher_out = teacher_io_dict[teacher_layer]['output']
+        student_out = student_io_dict[student_layer]['output']
 
         student_out = feature_extractor(student_out)
         distill_loss = weight * loss(student_out, teacher_out)
         distill_losses.append(distill_loss)
+
     return distill_losses
 
 
@@ -73,6 +84,7 @@ def parse_auxiliary_module(
 ) -> dict[str, nn.Module]:
 
     auxiliary_map = {}
+
     for teacher_layer in teacher_student_layer_map.keys():
         if teacher_layer == 'base':
             continue
@@ -84,6 +96,7 @@ def parse_auxiliary_module(
         # NOTE: . cannot be used with name of modules.
         auxiliary_layer = auxiliary_layer.replace('.', '_')
         auxiliary_map[auxiliary_layer] = feature_extractor
+
     return auxiliary_map
 
 
@@ -93,17 +106,19 @@ def train_distill(
     loader: DataLoader,
     criterion: nn.modules.loss._Loss,
     optimizer: torch.optim.Optimizer,
+    lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
     epoch: int,
-    forward_manager: ForwardHookManager,
+    teacher_forward_manager: ForwardHookManager,
+    student_forward_manager: ForwardHookManager,
     teacher_student_layer_map: dict,
     device,
 ) -> None:
+
     teacher_model.eval()
     student_model.train()
 
     teacher_top1, teacher_losses = AverageMeter(), AverageMeter()
     student_top1, student_losses = AverageMeter(), AverageMeter()
-
     cross_entropy_weight = teacher_student_layer_map['base'][-1]
 
     start = time.perf_counter()
@@ -120,7 +135,9 @@ def train_distill(
         student_loss = criterion(student_output, target)
         student_loss *= cross_entropy_weight
 
-        distill_losses = get_distill_losses(forward_manager, teacher_student_layer_map)
+        distill_losses = get_distill_losses(
+            teacher_forward_manager, student_forward_manager, teacher_student_layer_map
+        )
         # NOTE: distill weights included in get_distill_losses().
         all_distill_loss = 0.0
         for distill_loss in distill_losses:
@@ -144,8 +161,13 @@ def train_distill(
             teacher_top1.update(teacher_prec1.item(), size)
 
     runtime = time.perf_counter() - start
+
     logging.info(
-        f'Tr E={epoch:03d}, A={student_top1.avg:.2f}, L={student_losses.avg:.4f}, {runtime:.3f}s'
+        f'Tr E={epoch:03d}, '
+        f'A={student_top1.avg:.2f}, '
+        f'L={student_losses.avg:.4f}, '
+        f'Lr={lr_scheduler.get_last_lr()[0]:.3e} '
+        f'{runtime:.3f}s'
     )
 
 
@@ -154,6 +176,7 @@ def logit_distillation(
     student_logits: Tensor,
     T: float,
 ) -> Tensor:
+
     soft_teacher_logits = F.softmax(teacher_logits / T, dim=-1)
     soft_student_logits = F.log_softmax(student_logits / T, dim=-1)
 
@@ -193,24 +216,25 @@ if __name__ == '__main__':
     parser.add_argument('--student-dir', type=str, default='')
     parser.add_argument('--teacher-dir', type=str, default='resnet110.pt')
     parser.add_argument('--T', type=float, default=2.0)
+    parser.add_argument('--compile', action='store_true')
     args = parser.parse_args()
 
-    # NOTE: teacher_layer: [student_layer, feature_extractor, loss]
+    # NOTE: teacher_layer: [student_layer, feature_extractor, loss, loss_weight]
     TEACHER_STUDENT_LAYER_MAP = {
-        # cross entropy weights
+        # cross entropy loss
         'base': [
             None,
             None,
             None,
             3 / 4,
         ],
-        # feature-based
-        'layer3.17': [
-            'layer3.0',
-            nn.Identity(),
-            nn.MSELoss(reduction='mean'),
-            1 / 8,
-        ],
+        # # feature-based
+        # 'layer3.17': [
+        #     'layer3.0',
+        #     nn.Identity(),
+        #     nn.MSELoss(reduction='mean'),
+        #     1 / 8,
+        # ],
         # logit-based
         'linear': [
             'linear',
@@ -268,14 +292,18 @@ if __name__ == '__main__':
     teacher_model = teacher_model.to(device)
     student_model = student_model.to(device)
 
+    if args.compile:
+        teacher_model = torch.compile(teacher_model)
+        student_model = torch.compile(student_model)
+
     train_transforms = T.Compose(
         [
             T.RandomHorizontalFlip(),
             T.RandomCrop(32, 4),
             T.ToTensor(),
             T.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225],
+                mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225),
             ),
         ]
     )
@@ -283,8 +311,8 @@ if __name__ == '__main__':
         [
             T.ToTensor(),
             T.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225],
+                mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225),
             ),
         ]
     )
@@ -328,14 +356,19 @@ if __name__ == '__main__':
         milestones=[100, 150],
     )
 
-    forward_manager = set_forward_manager(
+    # NOTE: requires two forward managers, otherwise same layer names will cause
+    # overlapped.
+    forward_managers = set_forward_manager(
         teacher_model,
         student_model,
         TEACHER_STUDENT_LAYER_MAP,
         device,
     )
+    teacher_forward_manager = forward_managers['teacher_forward_manager']
+    student_forward_manager = forward_managers['student_forward_manager']
 
     best_student_prec1 = best_student_epoch = 0
+
     for epoch in range(1, args.epochs + 1):
         train_distill(
             teacher_model,
@@ -343,8 +376,10 @@ if __name__ == '__main__':
             train_loader,
             criterion,
             optimizer,
+            lr_scheduler,
             epoch,
-            forward_manager,
+            teacher_forward_manager,
+            student_forward_manager,
             TEACHER_STUDENT_LAYER_MAP,
             device,
         )
@@ -352,10 +387,15 @@ if __name__ == '__main__':
             student_model,
             test_loader,
             criterion,
+            lr_scheduler,
             epoch,
             device,
         )
         lr_scheduler.step()
+
+        state_dict = student_model.state_dict()
+        if hasattr(student_model, '_orig_mod'):
+            state_dict = student_model._orig_mod.state_dict()
 
         is_best = student_prec1 > best_student_prec1
         best_student_prec1 = max(student_prec1, best_student_prec1)
@@ -364,7 +404,7 @@ if __name__ == '__main__':
             torch.save(
                 {
                     'epoch': best_student_epoch,
-                    'state_dict': student_model.state_dict(),
+                    'state_dict': state_dict,
                     'best_student_prec1': best_student_prec1,
                 },
                 os.path.join(exp_dir, f'{args.student_arch}.pt'),
