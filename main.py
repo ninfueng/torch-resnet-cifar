@@ -48,6 +48,7 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = resnet.__dict__[args.arch]()
     model = model.to(device)
+
     if args.compile:
         model = torch.compile(model)
 
@@ -57,8 +58,8 @@ if __name__ == '__main__':
             T.RandomCrop(32, 4),
             T.ToTensor(),
             T.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225],
+                mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225),
             ),
         ]
     )
@@ -66,8 +67,8 @@ if __name__ == '__main__':
         [
             T.ToTensor(),
             T.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225],
+                mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225),
             ),
         ]
     )
@@ -107,23 +108,28 @@ if __name__ == '__main__':
     )
     lr_scheduler = MultiStepLR(
         optimizer,
-        milestones=[100, 150],
+        milestones=[round(0.5 * args.epochs), round(0.75 * args.epochs)],
     )
 
     best_prec1 = best_epoch = 0
     for epoch in range(1, args.epochs + 1):
-        train(model, train_loader, criterion, optimizer, epoch, device)
-        prec1 = test(model, test_loader, criterion, epoch, device)
+        train(model, train_loader, criterion, optimizer, lr_scheduler, epoch, device)
+        prec1 = test(model, test_loader, criterion, lr_scheduler, epoch, device)
         lr_scheduler.step()
 
         is_best = prec1 > best_prec1
         best_prec1 = max(prec1, best_prec1)
         best_epoch = epoch + 1
+
+        state_dict = model.state_dict()
+        if hasattr(model, '_orig_mod'):
+            state_dict = model._orig_mod.state_dict()
+
         if is_best:
             torch.save(
                 {
                     'epoch': best_epoch,
-                    'state_dict': model.state_dict(),
+                    'state_dict': state_dict,
                     'best_prec1': best_prec1,
                 },
                 os.path.join(exp_dir, f'{args.arch}.pt'),

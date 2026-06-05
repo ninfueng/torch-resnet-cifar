@@ -13,6 +13,7 @@ def train(
     loader: DataLoader,
     criterion: nn.modules.loss._Loss,
     optimizer: torch.optim.Optimizer,
+    lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
     epoch: int,
     device,
 ) -> None:
@@ -40,7 +41,11 @@ def train(
 
     runtime = time.perf_counter() - start
     logging.info(
-        f'Tr E={epoch:03d}, A={top1.avg:.2f}, L={losses.avg:.4f}, {runtime:.3f}s'
+        f'Tr E={epoch:03d}, '
+        f'A={top1.avg:.2f}, '
+        f'L={losses.avg:.4f}, '
+        f'Lr={lr_scheduler.get_last_lr()[0]:.3e} '
+        f'{runtime:.3f}s '
     )
 
 
@@ -49,6 +54,7 @@ def test(
     model: nn.Module,
     loader: DataLoader,
     criterion: nn.modules.loss._Loss,
+    lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
     epoch: int,
     device,
 ) -> float:
@@ -71,6 +77,10 @@ def test(
 
     runtime = time.perf_counter() - start
     logging.info(
-        f'Te E={epoch:03d}, A={top1.avg:.2f}, L={losses.avg:.4f}, {runtime:.3f}s'
+        f'Te E={epoch:03d}, '
+        f'A={top1.avg:.2f}, '
+        f'L={losses.avg:.4f}, '
+        f'Lr={lr_scheduler.get_last_lr()[0]:.3e} '
+        f'{runtime:.3f}s '
     )
     return top1.avg
