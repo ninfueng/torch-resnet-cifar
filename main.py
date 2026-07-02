@@ -23,10 +23,11 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=0.1)
     parser.add_argument('--momentum', type=float, default=0.9)
-    parser.add_argument('--weight-decay', type=float, default=1e-4)
+    parser.add_argument('--weight-decay', type=float, default=3e-3)
     parser.add_argument('--exp-dir', type=str, default='exps')
     parser.add_argument('--dataset-dir', type=str, default='./data')
     parser.add_argument('--compile', action='store_true')
+    parser.add_argument('--linear-weight-decay', action='store_true')
     args = parser.parse_args()
 
     cudnn.benchmark = True
@@ -113,6 +114,12 @@ if __name__ == '__main__':
 
     best_prec1 = best_epoch = 0
     for epoch in range(1, args.epochs + 1):
+
+        if args.linear_weight_decay:
+            for param_group in optimizer.param_groups:
+                weight_decay = args.weight_decay * (epoch / args.epochs)
+                param_group['weight_decay'] = weight_decay
+
         train(model, train_loader, criterion, optimizer, lr_scheduler, epoch, device)
         prec1 = test(model, test_loader, criterion, lr_scheduler, epoch, device)
         lr_scheduler.step()
